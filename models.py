@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -103,6 +103,78 @@ class CriticalAnalysis(BaseModel):
     confidence_assessment: str = Field(description="Overall confidence assessment of the research")
     analysis_timestamp: datetime = Field(default_factory=datetime.now)
 
+class TrendData(BaseModel):
+    label: str = Field(description="Trend label or time period")
+    value: float = Field(description="Trend value")
+    category: str = Field(description="Category this trend belongs to")
+
+class CategoryDistribution(BaseModel):
+    category: str = Field(description="Category name")
+    count: int = Field(description="Number of items in category")
+    percentage: float = Field(description="Percentage of total")
+    description: str = Field(description="Description of what this category represents")
+
+class StatisticalInsight(BaseModel):
+    insight_type: str = Field(description="Type of insight (trend, pattern, anomaly, etc.)")
+    title: str = Field(description="Title of the insight")
+    description: str = Field(description="Detailed description of the insight")
+    data_points: List[Dict[str, Any]] = Field(description="Raw data points for visualization")
+    significance: float = Field(description="Significance score (0-1)", ge=0, le=1)
+    implications: List[str] = Field(description="Implications of this insight")
+
+class VisualizationSpec(BaseModel):
+    chart_type: str = Field(description="Type of chart (bar, line, pie, scatter, heatmap)")
+    title: str = Field(description="Chart title")
+    x_label: Optional[str] = Field(default=None, description="X-axis label")
+    y_label: Optional[str] = Field(default=None, description="Y-axis label")
+    data: Dict[str, Any] = Field(description="Data for the visualization")
+
+class InsightAnalysis(BaseModel):
+    research_query: str = Field(description="Original research query")
+    analysis_timestamp: datetime = Field(default_factory=datetime.now)
+
+    # Categorization insights
+    source_categorization: List[CategoryDistribution] = Field(
+        description="Distribution of sources by type"
+    )
+    topic_categorization: List[CategoryDistribution] = Field(
+        description="Distribution of content by subtopic"
+    )
+
+    # Trend insights
+    temporal_trends: List[TrendData] = Field(
+        description="Trends over time if temporal data available"
+    )
+    relevance_trends: List[TrendData] = Field(
+        description="Relevance score trends across sources"
+    )
+
+    # Statistical insights
+    key_statistics: Dict[str, float] = Field(
+        description="Key statistical metrics"
+    )
+    statistical_insights: List[StatisticalInsight] = Field(
+        description="Detailed statistical insights"
+    )
+
+    # Visualizations
+    visualizations: List[VisualizationSpec] = Field(
+        description="Specifications for charts and graphs"
+    )
+
+    # Patterns and implications
+    patterns_identified: List[str] = Field(
+        description="Key patterns identified in the data"
+    )
+    future_implications: List[str] = Field(
+        description="Future implications based on insights"
+    )
+
+    # Summary
+    executive_insight_summary: str = Field(
+        description="Executive summary of all insights"
+    )
+
 class ResearchState(BaseModel):
     research_query: str = Field(description="User's research question")
     search_results: Optional[WebSearchResult] = Field(
@@ -110,6 +182,9 @@ class ResearchState(BaseModel):
     )
     critical_analysis: Optional[CriticalAnalysis] = Field(
         default=None, description="Analysis from critical analysis agent"
+    )
+    insight_analysis: Optional[InsightAnalysis] = Field(
+        default=None, description="Statistical insights from insight generation agent"
     )
     current_step: str = Field(
         default="initial", description="Current step in the research process"

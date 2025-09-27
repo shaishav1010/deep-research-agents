@@ -2,6 +2,8 @@ import streamlit as st
 import os
 from openai import OpenAI
 import json
+import plotly.express as px
+import plotly.graph_objects as go
 from research_agent import ResearchGraph
 from models import ResearchState
 
@@ -148,6 +150,135 @@ def display_research_results(results: ResearchState):
         st.markdown("### 📊 Overall Confidence")
         st.markdown(f"**{analysis.confidence_assessment}**")
 
+    # Display Insight Analysis with Visualizations
+    if results.insight_analysis:
+        insights = results.insight_analysis
+
+        st.markdown("---")
+        st.markdown("## 📈 Statistical Insights & Visualizations")
+
+        # Executive Insight Summary
+        st.markdown("### 🎯 Insight Summary")
+        st.info(insights.executive_insight_summary)
+
+        # Key Statistics
+        st.markdown("### 📊 Key Statistics")
+        cols = st.columns(3)
+        stats = insights.key_statistics
+
+        with cols[0]:
+            st.metric("Average Relevance", f"{stats.get('avg_relevance', 0):.1f}%")
+            st.metric("Total Sources", stats.get('total_sources', 0))
+
+        with cols[1]:
+            st.metric("Max Relevance", f"{stats.get('max_relevance', 0):.0f}%")
+            st.metric("Subtopics", stats.get('num_subtopics', 1))
+
+        with cols[2]:
+            st.metric("Min Relevance", f"{stats.get('min_relevance', 0):.0f}%")
+            st.metric("Confidence", f"{stats.get('confidence_level', 0.5):.0%}")
+
+        # Visualizations
+        if insights.visualizations:
+            st.markdown("### 📊 Data Visualizations")
+
+            for viz in insights.visualizations:
+                if viz.chart_type == "pie":
+                    labels = viz.data.get("labels", [])
+                    values = viz.data.get("values", [])
+
+                    if labels and values:  # Only create chart if we have data
+                        fig = go.Figure(data=[go.Pie(
+                            labels=labels,
+                            values=values,
+                            hole=0.3
+                        )])
+                        fig.update_layout(
+                            title=viz.title,
+                            height=400,
+                            showlegend=True
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                elif viz.chart_type == "bar":
+                    x_data = viz.data.get("x", [])
+                    y_data = viz.data.get("y", [])
+
+                    if x_data and y_data:  # Only create chart if we have data
+                        fig = go.Figure(data=[go.Bar(
+                            x=x_data,
+                            y=y_data,
+                            marker_color='rgb(55, 83, 109)'
+                        )])
+                        fig.update_layout(
+                            title=viz.title,
+                            xaxis_title=viz.x_label if viz.x_label else "Categories",
+                            yaxis_title=viz.y_label if viz.y_label else "Values",
+                            height=400,
+                            showlegend=False
+                        )
+                        fig.update_xaxes(tickangle=-45)
+                        st.plotly_chart(fig, use_container_width=True)
+
+                elif viz.chart_type == "line":
+                    x_data = viz.data.get("x", [])
+                    y_data = viz.data.get("y", [])
+
+                    if x_data and y_data:  # Only create chart if we have data
+                        fig = go.Figure(data=[go.Scatter(
+                            x=x_data,
+                            y=y_data,
+                            mode='lines+markers',
+                            line=dict(color='rgb(55, 83, 109)', width=2),
+                            marker=dict(size=8)
+                        )])
+                        fig.update_layout(
+                            title=viz.title,
+                            xaxis_title=viz.x_label if viz.x_label else "X Axis",
+                            yaxis_title=viz.y_label if viz.y_label else "Y Axis",
+                            height=400,
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+        # Source Categorization
+        if insights.source_categorization:
+            st.markdown("### 📂 Source Distribution")
+            cols = st.columns(len(insights.source_categorization[:4]))
+            for i, cat in enumerate(insights.source_categorization[:4]):
+                with cols[i]:
+                    st.markdown(f"**{cat.category}**")
+                    st.progress(cat.percentage / 100)
+                    st.markdown(f"{cat.count} sources ({cat.percentage:.1f}%)")
+
+        # Statistical Insights
+        if insights.statistical_insights:
+            st.markdown("### 🔍 Statistical Findings")
+            for insight in insights.statistical_insights:
+                with st.expander(f"{insight.title} - {insight.insight_type.upper()}"):
+                    st.markdown(f"**{insight.description}**")
+                    st.markdown(f"*Significance: {insight.significance:.0%}*")
+                    if insight.implications:
+                        st.markdown("**Implications:**")
+                        for impl in insight.implications:
+                            st.markdown(f"• {impl}")
+
+        # Patterns and Future Implications
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 🔮 Patterns Identified")
+            for pattern in insights.patterns_identified:
+                st.markdown(f"• {pattern}")
+
+        with col2:
+            st.markdown("### 🚀 Future Implications")
+            for implication in insights.future_implications:
+                st.markdown(f"• {implication}")
+
+    # Export Options (moved here to include all data)
+    if results.critical_analysis:
+        analysis = results.critical_analysis
         # Export Options
         with st.expander("📋 Export Analysis"):
             export_data = {
@@ -175,8 +306,33 @@ def display_research_results(results: ResearchState):
                 "recommendations": analysis.recommendations,
                 "confidence": analysis.confidence_assessment
             }
+
+            # Add insights data if available
+            if results.insight_analysis:
+                export_data["insights"] = {
+                    "executive_summary": results.insight_analysis.executive_insight_summary,
+                    "key_statistics": results.insight_analysis.key_statistics,
+                    "patterns": results.insight_analysis.patterns_identified,
+                    "future_implications": results.insight_analysis.future_implications,
+                    "source_categorization": [
+                        {
+                            "category": cat.category,
+                            "count": cat.count,
+                            "percentage": cat.percentage
+                        } for cat in results.insight_analysis.source_categorization
+                    ],
+                    "statistical_insights": [
+                        {
+                            "type": si.insight_type,
+                            "title": si.title,
+                            "description": si.description,
+                            "significance": si.significance
+                        } for si in results.insight_analysis.statistical_insights
+                    ]
+                }
+
             st.download_button(
-                label="Download Analysis JSON",
+                label="Download Complete Analysis JSON",
                 data=json.dumps(export_data, indent=2),
                 file_name=f"analysis_{analysis.analysis_timestamp.strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
@@ -340,7 +496,7 @@ def main():
                     st.warning("Please enter a research topic")
 
         if st.session_state.research_in_progress:
-            with st.spinner("🔎 Contextual Retriever Agent searching sources... → Critical Analysis Agent analyzing findings..."):
+            with st.spinner("🔎 Contextual Retriever Agent searching sources... → Critical Analysis Agent analyzing findings... → Insight Generation Agent creating visualizations..."):
                 try:
                     research_graph = ResearchGraph(
                         st.session_state.openrouter_api_key,

@@ -1,14 +1,14 @@
 import os
-from research_agent import WebSearchNode
+from research_agent import ContextualRetrieverAgent
 
 # Test just the search functionality without LLM
 def test_search_only():
     print("Testing search functionality...")
 
     # Create search node with dummy keys
-    search_node = WebSearchNode(
+    search_node = ContextualRetrieverAgent(
         api_key="sk-or-dummy",  # Won't be used for search
-        tavily_api_key=None  # Will trigger mock data
+        tavily_api_key="tvly-test"  # Dummy key for testing
     )
 
     # Test query
