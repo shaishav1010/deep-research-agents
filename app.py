@@ -45,22 +45,51 @@ def display_research_results(results: ResearchState):
         st.error(f"Error: {results.error}")
         return
 
-    # Show brief retriever summary
+    # Show enhanced retriever summary with query refinement
     if results.search_results:
         with st.expander("📊 Contextual Retriever Summary", expanded=False):
             search_res = results.search_results
-            col1, col2, col3 = st.columns(3)
+
+            # Query Refinement Section
+            if search_res.refined_query:
+                st.markdown("### 🎯 Query Interpretation & Refinement")
+                st.info(f"**Interpretation:** {search_res.refined_query.interpretation}")
+
+                st.markdown("**Subtopics Identified:**")
+                for subtopic in search_res.refined_query.subtopics:
+                    importance_bar = "🟢" * int(subtopic.importance * 5)
+                    st.markdown(f"• **{subtopic.topic}** {importance_bar}")
+                    st.markdown(f"  _{subtopic.description}_")
+
+            # Metrics
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Sources Found", search_res.total_results_found)
+                st.metric("Total Sources", search_res.total_results_found)
             with col2:
                 st.metric("Sources Analyzed", len(search_res.sources))
             with col3:
-                avg_relevance = sum(s.relevance_score for s in search_res.sources) / len(search_res.sources)
-                st.metric("Avg Relevance", f"{avg_relevance:.1f}%")
+                if search_res.refined_query:
+                    st.metric("Subtopics", len(search_res.refined_query.subtopics))
+                else:
+                    st.metric("Subtopics", "1")
+            with col4:
+                # Count source types
+                source_types = set(s.source_type.value for s in search_res.sources)
+                st.metric("Source Types", len(source_types))
 
-            st.markdown("**Top Sources:**")
-            for i, source in enumerate(search_res.sources[:5], 1):
-                st.markdown(f"{i}. [{source.title}]({source.url}) - {source.relevance_score:.0f}%")
+            # Sources by Subtopic
+            if search_res.sources_by_subtopic:
+                st.markdown("### 📚 Sources by Subtopic")
+                for topic, sources in search_res.sources_by_subtopic.items():
+                    st.markdown(f"**{topic}:**")
+                    for source in sources[:3]:
+                        type_emoji = "📰" if source.source_type.value == "news_article" else \
+                                    "🎓" if source.source_type.value == "academic_paper" else \
+                                    "📊" if source.source_type.value == "report" else "🌐"
+                        st.markdown(f"  {type_emoji} [{source.title[:60]}...]({source.url})")
+
+            # Search Strategy
+            st.markdown(f"**Search Strategy:** {search_res.search_strategy}")
 
     # Main display: Critical Analysis Results
     if results.critical_analysis:

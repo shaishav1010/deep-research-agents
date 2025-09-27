@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -14,6 +14,7 @@ class SourceType(str, Enum):
     REPORT = "report"
     BOOK = "book"
     WEBSITE = "website"
+    DATABASE = "database"
     OTHER = "other"
 
 
@@ -35,13 +36,32 @@ class ResearchSource(BaseModel):
     )
 
 
+class Subtopic(BaseModel):
+    topic: str = Field(description="Subtopic title")
+    description: str = Field(description="Brief description of what this subtopic covers")
+    search_queries: List[str] = Field(description="Refined search queries for this subtopic")
+    importance: float = Field(description="Importance score (0-1)", ge=0, le=1)
+
+class RefinedQuery(BaseModel):
+    original_query: str = Field(description="Original user query")
+    interpretation: str = Field(description="How the query was interpreted")
+    refined_queries: List[str] = Field(description="List of refined, more specific queries")
+    subtopics: List[Subtopic] = Field(description="Breakdown into subtopics")
+    search_strategy: str = Field(description="Strategy for searching diverse sources")
+
 class WebSearchResult(BaseModel):
     query: str = Field(description="Original research query")
+    refined_query: Optional[RefinedQuery] = Field(
+        default=None, description="Refined and interpreted query with subtopics"
+    )
     search_timestamp: datetime = Field(
         default_factory=datetime.now, description="When the search was performed"
     )
     sources: List[ResearchSource] = Field(
         description="List of top sources ranked by relevance"
+    )
+    sources_by_subtopic: Optional[Dict[str, List[ResearchSource]]] = Field(
+        default=None, description="Sources organized by subtopic"
     )
     total_results_found: int = Field(
         description="Total number of results found before filtering"
