@@ -39,76 +39,117 @@ def verify_tavily_key(api_key):
         return False
 
 def display_research_results(results: ResearchState):
-    st.markdown("## 📊 Research Results")
+    st.markdown("## 🔬 Research Analysis Results")
 
     if results.error:
         st.error(f"Error: {results.error}")
         return
 
+    # Show brief retriever summary
     if results.search_results:
-        search_res = results.search_results
+        with st.expander("📊 Contextual Retriever Summary", expanded=False):
+            search_res = results.search_results
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Sources Found", search_res.total_results_found)
+            with col2:
+                st.metric("Sources Analyzed", len(search_res.sources))
+            with col3:
+                avg_relevance = sum(s.relevance_score for s in search_res.sources) / len(search_res.sources)
+                st.metric("Avg Relevance", f"{avg_relevance:.1f}%")
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Sources Found", search_res.total_results_found)
-        with col2:
-            st.metric("Top Sources Analyzed", len(search_res.sources))
-        with col3:
-            st.metric("Search Strategy", "Web Search")
+            st.markdown("**Top Sources:**")
+            for i, source in enumerate(search_res.sources[:5], 1):
+                st.markdown(f"{i}. [{source.title}]({source.url}) - {source.relevance_score:.0f}%")
 
-        st.markdown("### 💡 Key Insights")
-        for insight in search_res.key_insights:
-            st.info(f"• {insight}")
+    # Main display: Critical Analysis Results
+    if results.critical_analysis:
+        analysis = results.critical_analysis
 
-        st.markdown("### 📚 Top 10 Sources by Relevance")
+        # Executive Summary
+        st.markdown("### 📋 Executive Summary")
+        st.info(analysis.executive_summary)
 
-        for i, source in enumerate(search_res.sources, 1):
-            with st.expander(f"{i}. {source.title} (Relevance: {source.relevance_score:.1f}%)"):
-                col1, col2 = st.columns([3, 1])
+        # Key Findings
+        st.markdown("### 🎯 Key Findings")
+        for finding in analysis.key_findings:
+            confidence_emoji = "🟢" if finding.confidence > 0.8 else "🟡" if finding.confidence > 0.5 else "🟠"
+            with st.container():
+                st.markdown(f"{confidence_emoji} **{finding.finding}**")
+                st.markdown(f"   *Confidence: {finding.confidence:.0%} | Sources: {', '.join(finding.sources[:3])}*")
 
-                with col1:
-                    st.markdown(f"**Type:** {source.source_type.value.replace('_', ' ').title()}")
-                    st.markdown(f"**Domain:** {source.domain}")
-                    if source.author:
-                        st.markdown(f"**Author:** {source.author}")
-                    if source.published_date:
-                        st.markdown(f"**Published:** {source.published_date}")
-                    st.markdown(f"**URL:** [{source.url}]({source.url})")
+        # Contradictions and Conflicts
+        if analysis.contradictions:
+            st.markdown("### ⚠️ Contradictions Identified")
+            for contradiction in analysis.contradictions:
+                with st.container():
+                    st.warning(f"""**Conflict between sources:**
+• **{contradiction.source1}:** {contradiction.claim1}
+• **{contradiction.source2}:** {contradiction.claim2}
+*Explanation:* {contradiction.explanation}""")
 
-                with col2:
-                    relevance_color = "green" if source.relevance_score >= 80 else "orange" if source.relevance_score >= 60 else "red"
-                    st.markdown(f"### <span style='color: {relevance_color}'>{source.relevance_score:.0f}%</span>", unsafe_allow_html=True)
-                    st.markdown("**Relevance Score**")
+        # Consensus Points
+        st.markdown("### ✅ Consensus Points")
+        for point in analysis.consensus_points:
+            st.success(f"• {point}")
 
-                st.markdown("**Summary:**")
-                st.write(source.snippet)
+        # Source Validation
+        st.markdown("### 🔍 Source Credibility")
+        cols = st.columns(min(3, len(analysis.source_validations)))
+        for i, validation in enumerate(analysis.source_validations[:3]):
+            with cols[i]:
+                color = "green" if validation.credibility_score >= 80 else "orange" if validation.credibility_score >= 60 else "red"
+                st.markdown(f"**{validation.source_title[:50]}...**")
+                st.markdown(f"<h3 style='color: {color}'>{validation.credibility_score:.0f}%</h3>", unsafe_allow_html=True)
+                if validation.potential_biases:
+                    st.markdown(f"⚠️ *Biases: {', '.join(validation.potential_biases)}*")
 
-                st.markdown("**Why Relevant:**")
-                st.info(source.reasoning)
+        # Knowledge Gaps
+        if analysis.gaps_identified:
+            st.markdown("### 🔓 Knowledge Gaps")
+            for gap in analysis.gaps_identified:
+                st.markdown(f"• {gap}")
 
-                st.markdown("---")
+        # Recommendations
+        st.markdown("### 💡 Recommendations")
+        for rec in analysis.recommendations:
+            st.markdown(f"• **{rec}**")
 
-        with st.expander("📋 Export Results"):
+        # Confidence Assessment
+        st.markdown("### 📊 Overall Confidence")
+        st.markdown(f"**{analysis.confidence_assessment}**")
+
+        # Export Options
+        with st.expander("📋 Export Analysis"):
             export_data = {
-                "query": search_res.query,
-                "timestamp": search_res.search_timestamp.isoformat(),
-                "total_results": search_res.total_results_found,
-                "sources": [
+                "query": results.research_query,
+                "analysis_timestamp": analysis.analysis_timestamp.isoformat(),
+                "executive_summary": analysis.executive_summary,
+                "key_findings": [
                     {
-                        "title": s.title,
-                        "url": s.url,
-                        "relevance_score": s.relevance_score,
-                        "type": s.source_type.value,
-                        "snippet": s.snippet,
-                        "reasoning": s.reasoning
-                    }
-                    for s in search_res.sources
-                ]
+                        "finding": f.finding,
+                        "confidence": f.confidence,
+                        "sources": f.sources
+                    } for f in analysis.key_findings
+                ],
+                "contradictions": [
+                    {
+                        "source1": c.source1,
+                        "source2": c.source2,
+                        "claim1": c.claim1,
+                        "claim2": c.claim2,
+                        "explanation": c.explanation
+                    } for c in analysis.contradictions
+                ],
+                "consensus_points": analysis.consensus_points,
+                "gaps": analysis.gaps_identified,
+                "recommendations": analysis.recommendations,
+                "confidence": analysis.confidence_assessment
             }
             st.download_button(
-                label="Download JSON",
+                label="Download Analysis JSON",
                 data=json.dumps(export_data, indent=2),
-                file_name=f"research_{search_res.search_timestamp.strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"analysis_{analysis.analysis_timestamp.strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
 
@@ -270,7 +311,7 @@ def main():
                     st.warning("Please enter a research topic")
 
         if st.session_state.research_in_progress:
-            with st.spinner("🔎 Searching and analyzing web sources..."):
+            with st.spinner("🔎 Contextual Retriever Agent searching sources... → Critical Analysis Agent analyzing findings..."):
                 try:
                     research_graph = ResearchGraph(
                         st.session_state.openrouter_api_key,

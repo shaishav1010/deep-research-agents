@@ -54,10 +54,42 @@ class WebSearchResult(BaseModel):
     )
 
 
+class Contradiction(BaseModel):
+    source1: str = Field(description="Title or reference of first source")
+    source2: str = Field(description="Title or reference of second source")
+    claim1: str = Field(description="Claim from first source")
+    claim2: str = Field(description="Conflicting claim from second source")
+    explanation: str = Field(description="Explanation of why these claims contradict")
+
+class KeyFinding(BaseModel):
+    finding: str = Field(description="Key finding or insight")
+    sources: List[str] = Field(description="Sources supporting this finding")
+    confidence: float = Field(description="Confidence level (0-1)", ge=0, le=1)
+
+class SourceValidation(BaseModel):
+    source_title: str = Field(description="Title of the source")
+    credibility_score: float = Field(description="Credibility score (0-100)", ge=0, le=100)
+    credibility_factors: List[str] = Field(description="Factors affecting credibility")
+    potential_biases: List[str] = Field(description="Identified potential biases")
+
+class CriticalAnalysis(BaseModel):
+    executive_summary: str = Field(description="High-level executive summary of findings")
+    key_findings: List[KeyFinding] = Field(description="List of key findings from all sources")
+    contradictions: List[Contradiction] = Field(description="Identified contradictions between sources")
+    source_validations: List[SourceValidation] = Field(description="Validation of top sources")
+    consensus_points: List[str] = Field(description="Points where multiple sources agree")
+    gaps_identified: List[str] = Field(description="Knowledge gaps or areas needing more research")
+    recommendations: List[str] = Field(description="Recommended next steps or actions")
+    confidence_assessment: str = Field(description="Overall confidence assessment of the research")
+    analysis_timestamp: datetime = Field(default_factory=datetime.now)
+
 class ResearchState(BaseModel):
     research_query: str = Field(description="User's research question")
     search_results: Optional[WebSearchResult] = Field(
-        default=None, description="Results from web search"
+        default=None, description="Results from contextual retriever agent"
+    )
+    critical_analysis: Optional[CriticalAnalysis] = Field(
+        default=None, description="Analysis from critical analysis agent"
     )
     current_step: str = Field(
         default="initial", description="Current step in the research process"

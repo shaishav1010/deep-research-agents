@@ -7,10 +7,13 @@ from langchain.output_parsers import PydanticOutputParser
 from langgraph.graph import StateGraph, END
 from tavily import TavilyClient
 import json
-from models import ResearchSource, WebSearchResult, ResearchState, SourceType
+from models import (
+    ResearchSource, WebSearchResult, ResearchState, SourceType,
+    CriticalAnalysis, KeyFinding, Contradiction, SourceValidation
+)
 
 
-class WebSearchNode:
+class ContextualRetrieverAgent:
     def __init__(self, api_key: str, tavily_api_key: str):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
@@ -149,20 +152,155 @@ Analyze these results and return structured output with the top 10 most relevant
             }
 
 
+class CriticalAnalysisAgent:
+    def __init__(self, api_key: str):
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={
+                "HTTP-Referer": "http://localhost:8501",
+                "X-Title": "Deep Research Agent - Critical Analysis",
+            }
+        )
+        self.parser = PydanticOutputParser(pydantic_object=CriticalAnalysis)
+
+    def analyze(self, query: str, search_results: WebSearchResult) -> CriticalAnalysis:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a critical analysis expert. Your job is to:
+1. Synthesize information from multiple sources
+2. Identify contradictions and conflicts between sources
+3. Validate source credibility
+4. Find consensus points and gaps
+5. Provide actionable recommendations
+
+Analyze the search results thoroughly and provide structured critical analysis.
+
+{format_instructions}"""),
+            ("human", """Research Query: {query}
+
+Search Results to Analyze:
+Total Sources: {total_sources}
+Sources:
+{sources_detail}
+
+Please provide a comprehensive critical analysis of these sources.""")
+        ])
+
+        # Prepare source details for analysis
+        sources_detail = []
+        for i, source in enumerate(search_results.sources, 1):
+            sources_detail.append(f"""
+Source {i}: {source.title}
+- Type: {source.source_type.value}
+- Relevance: {source.relevance_score}%
+- URL: {source.url}
+- Content: {source.snippet}
+- Reasoning: {source.reasoning}
+""")
+
+        try:
+            formatted_prompt = prompt.format_messages(
+                format_instructions=self.parser.get_format_instructions(),
+                query=query,
+                total_sources=len(search_results.sources),
+                sources_detail="\n".join(sources_detail)
+            )
+
+            response = self.llm.invoke(formatted_prompt)
+            parsed_result = self.parser.parse(response.content)
+            return parsed_result
+        except Exception as e:
+            print(f"Critical analysis failed: {e}, using fallback analysis")
+            return self.fallback_analysis(query, search_results)
+
+    def fallback_analysis(self, query: str, search_results: WebSearchResult) -> CriticalAnalysis:
+        """Provide basic analysis if LLM fails"""
+        sources = search_results.sources[:5]
+
+        return CriticalAnalysis(
+            executive_summary=f"Analysis of {len(search_results.sources)} sources for query: {query}. "
+                            f"Sources show varied perspectives with relevance scores ranging from "
+                            f"{min(s.relevance_score for s in sources)}% to {max(s.relevance_score for s in sources)}%.",
+            key_findings=[
+                KeyFinding(
+                    finding=f"Primary information from {sources[0].title}",
+                    sources=[sources[0].title],
+                    confidence=0.7
+                )
+            ],
+            contradictions=[],
+            source_validations=[
+                SourceValidation(
+                    source_title=source.title,
+                    credibility_score=source.relevance_score,
+                    credibility_factors=["Relevance to query", "Source domain reputation"],
+                    potential_biases=[]
+                ) for source in sources[:3]
+            ],
+            consensus_points=[f"Multiple sources discuss {query}"],
+            gaps_identified=["Deeper analysis required for comprehensive understanding"],
+            recommendations=["Review top sources for detailed information", "Consider additional research for gaps"],
+            confidence_assessment="Moderate confidence based on available sources"
+        )
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        print("Critical Analysis Agent executing...")
+
+        # Get search results from previous step
+        search_results = state.get("search_results")
+        query = state.get("research_query", "")
+
+        if not search_results:
+            return {
+                **state,
+                "critical_analysis": None,
+                "current_step": "error",
+                "error": "No search results to analyze"
+            }
+
+        try:
+            analysis = self.analyze(query, search_results)
+
+            return {
+                **state,
+                "critical_analysis": analysis,
+                "current_step": "analysis_completed",
+                "error": None
+            }
+        except Exception as e:
+            return {
+                **state,
+                "critical_analysis": None,
+                "current_step": "error",
+                "error": f"Critical analysis failed: {str(e)}"
+            }
+
+
 class ResearchGraph:
     def __init__(self, api_key: str, tavily_api_key: str):
         self.api_key = api_key
-        self.web_search_node = WebSearchNode(api_key, tavily_api_key)
+        # Initialize agents
+        self.retriever_agent = ContextualRetrieverAgent(api_key, tavily_api_key)
+        self.analysis_agent = CriticalAnalysisAgent(api_key)
         self.workflow = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(dict)
 
-        workflow.add_node("web_search", self.web_search_node.execute)
+        # Add nodes for both agents
+        workflow.add_node("contextual_retriever", self.retriever_agent.execute)
+        workflow.add_node("critical_analysis", self.analysis_agent.execute)
 
-        workflow.set_entry_point("web_search")
+        # Set the entry point
+        workflow.set_entry_point("contextual_retriever")
 
-        workflow.add_edge("web_search", END)
+        # Add edge from retriever to analysis
+        workflow.add_edge("contextual_retriever", "critical_analysis")
+
+        # End after analysis
+        workflow.add_edge("critical_analysis", END)
 
         return workflow.compile()
 
@@ -170,6 +308,7 @@ class ResearchGraph:
         initial_state = {
             "research_query": research_query,
             "search_results": None,
+            "critical_analysis": None,
             "current_step": "initial",
             "error": None
         }
