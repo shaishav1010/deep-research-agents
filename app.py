@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from research_agent import ResearchGraph
 from models import ResearchState
+from export_utils import generate_pdf, generate_docx, generate_xml
 
 def init_session_state():
     if "openrouter_api_key" not in st.session_state:
@@ -46,6 +47,94 @@ def display_research_results(results: ResearchState):
     if results.error:
         st.error(f"Error: {results.error}")
         return
+
+    # Display Research Report at the top with export options
+    if results.research_report:
+        report = results.research_report
+        st.markdown("## 📋 Research Report")
+
+        # Export buttons
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
+
+        with col1:
+            pdf_data = generate_pdf(report)
+            st.download_button(
+                label="📄 Download PDF",
+                data=pdf_data,
+                file_name=f"research_report_{report.report_timestamp.strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
+
+        with col2:
+            docx_data = generate_docx(report)
+            st.download_button(
+                label="📝 Download Word",
+                data=docx_data,
+                file_name=f"research_report_{report.report_timestamp.strftime('%Y%m%d_%H%M%S')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+
+        with col3:
+            xml_data = generate_xml(report)
+            st.download_button(
+                label="📊 Download XML",
+                data=xml_data,
+                file_name=f"research_report_{report.report_timestamp.strftime('%Y%m%d_%H%M%S')}.xml",
+                mime="application/xml"
+            )
+
+        # Display report content
+        with st.expander("📖 Full Report", expanded=True):
+            st.markdown(f"### {report.title}")
+            st.caption(f"Generated: {report.report_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Executive Summary
+            st.markdown("#### Executive Summary")
+            st.info(report.executive_summary)
+
+            # Key Takeaways
+            if report.key_takeaways:
+                st.markdown("#### Key Takeaways")
+                for takeaway in report.key_takeaways:
+                    st.markdown(f"• {takeaway}")
+
+            # Main sections
+            tabs = st.tabs([
+                "Introduction", "Methodology", "Findings",
+                "Analysis", "Insights", "Conclusions"
+            ])
+
+            with tabs[0]:
+                st.markdown(f"### {report.introduction.title}")
+                st.markdown(report.introduction.content)
+
+            with tabs[1]:
+                st.markdown(f"### {report.methodology.title}")
+                st.markdown(report.methodology.content)
+
+            with tabs[2]:
+                st.markdown(f"### {report.findings.title}")
+                st.markdown(report.findings.content)
+
+            with tabs[3]:
+                st.markdown(f"### {report.analysis.title}")
+                st.markdown(report.analysis.content)
+
+            with tabs[4]:
+                st.markdown(f"### {report.insights.title}")
+                st.markdown(report.insights.content)
+
+            with tabs[5]:
+                st.markdown(f"### {report.conclusions.title}")
+                st.markdown(report.conclusions.content)
+
+            # References
+            if report.references:
+                st.markdown("#### References")
+                for i, ref in enumerate(report.references, 1):
+                    st.markdown(f"{i}. [{ref.title}]({ref.url})")
+
+        st.divider()
 
     # Show enhanced retriever summary with query refinement
     if results.search_results:

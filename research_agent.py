@@ -11,7 +11,8 @@ from models import (
     ResearchSource, WebSearchResult, ResearchState, SourceType,
     CriticalAnalysis, KeyFinding, Contradiction, SourceValidation,
     RefinedQuery, Subtopic, InsightAnalysis, CategoryDistribution,
-    TrendData, StatisticalInsight, VisualizationSpec
+    TrendData, StatisticalInsight, VisualizationSpec,
+    ResearchReport, ReportSection
 )
 
 
@@ -840,6 +841,206 @@ Type: {source.source_type.value}
             }
 
 
+class ReportBuilderAgent:
+    def __init__(self, api_key: str):
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={
+                "HTTP-Referer": "http://localhost:8501",
+                "X-Title": "Deep Research Agent",
+            }
+        )
+        self.parser = PydanticOutputParser(pydantic_object=ResearchReport)
+
+    def generate_report(self, query: str, search_results: WebSearchResult,
+                        critical_analysis: CriticalAnalysis,
+                        insight_analysis: InsightAnalysis) -> ResearchReport:
+        """Generate comprehensive research report from all previous analyses"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a professional research report writer. Your task is to compile all research findings into a comprehensive, well-structured report.
+
+The report should:
+1. Have a clear executive summary
+2. Explain the research methodology
+3. Present findings in a logical order
+4. Include critical analysis
+5. Present statistical insights
+6. Provide actionable conclusions
+
+{format_instructions}"""),
+            ("human", """Generate a comprehensive research report for the following:
+
+Research Query: {query}
+
+Search Results Summary:
+- Total sources found: {total_sources}
+- Key source types: {source_types}
+- Main domains: {domains}
+
+Critical Analysis:
+{critical_analysis}
+
+Statistical Insights:
+{insights}
+
+Create a professional report with proper sections, clear takeaways, and word count.""")
+        ])
+
+        # Prepare source information
+        source_types = list(set([s.source_type for s in search_results.sources])) if search_results.sources else []
+        domains = list(set([s.domain for s in search_results.sources[:5]])) if search_results.sources else []
+
+        chain = prompt | self.llm | self.parser
+
+        try:
+            report = chain.invoke({
+                "query": query,
+                "format_instructions": self.parser.get_format_instructions(),
+                "total_sources": len(search_results.sources) if search_results.sources else 0,
+                "source_types": ", ".join(source_types[:3]),
+                "domains": ", ".join(domains[:3]),
+                "critical_analysis": json.dumps({
+                    "executive_summary": critical_analysis.executive_summary,
+                    "key_findings": [f.finding for f in critical_analysis.key_findings[:3]],
+                    "consensus_points": critical_analysis.consensus_points[:3],
+                    "recommendations": critical_analysis.recommendations[:3]
+                }, indent=2),
+                "insights": json.dumps({
+                    "key_statistics": insight_analysis.key_statistics,
+                    "patterns": insight_analysis.patterns_identified[:3],
+                    "executive_summary": insight_analysis.executive_insight_summary
+                }, indent=2) if insight_analysis else "No insights available"
+            })
+
+            return report
+        except Exception as e:
+            print(f"LLM parsing failed: {e}")
+            return self._generate_fallback_report(query, search_results, critical_analysis, insight_analysis)
+
+    def _generate_fallback_report(self, query: str, search_results: WebSearchResult,
+                                  critical_analysis: CriticalAnalysis,
+                                  insight_analysis: InsightAnalysis) -> ResearchReport:
+        """Generate fallback report if LLM fails"""
+
+        # Count words in all content
+        word_count = len(critical_analysis.executive_summary.split())
+        word_count += sum(len(f.finding.split()) for f in critical_analysis.key_findings)
+
+        # Extract key takeaways
+        key_takeaways = []
+        if critical_analysis.key_findings:
+            key_takeaways.extend([f.finding for f in critical_analysis.key_findings[:3]])
+        if critical_analysis.recommendations:
+            key_takeaways.extend(critical_analysis.recommendations[:2])
+
+        # Create report sections
+        introduction = ReportSection(
+            title="Introduction",
+            content=f"This report presents a comprehensive analysis of: {query}\n\n"
+                   f"The research was conducted using multiple sources and analytical techniques to provide "
+                   f"a thorough understanding of the topic.",
+            citations=[s.title for s in search_results.sources[:2]] if search_results.sources else []
+        )
+
+        methodology = ReportSection(
+            title="Research Methodology",
+            content=f"The research methodology consisted of:\n\n"
+                   f"1. **Query Refinement**: Breaking down the query into subtopics\n"
+                   f"2. **Multi-source Search**: Searching across {len(search_results.sources)} sources\n"
+                   f"3. **Critical Analysis**: Evaluating source credibility and identifying patterns\n"
+                   f"4. **Statistical Analysis**: Generating insights and visualizations\n"
+                   f"5. **Report Compilation**: Synthesizing all findings into this comprehensive report"
+        )
+
+        findings = ReportSection(
+            title="Key Findings",
+            content="\n\n".join([
+                f"**Finding {i+1}**: {f.finding}\n*Confidence: {f.confidence:.0%}*"
+                for i, f in enumerate(critical_analysis.key_findings[:5])
+            ]) if critical_analysis.key_findings else "No specific findings identified.",
+            visualizations=insight_analysis.visualizations[:2] if insight_analysis else None
+        )
+
+        analysis = ReportSection(
+            title="Critical Analysis",
+            content=f"## Executive Summary\n{critical_analysis.executive_summary}\n\n"
+                   f"## Consensus Points\n" + "\n".join([
+                       f"- {point}" for point in critical_analysis.consensus_points[:5]
+                   ]) + "\n\n## Knowledge Gaps\n" + "\n".join([
+                       f"- {gap}" for gap in critical_analysis.gaps_identified[:3]
+                   ])
+        )
+
+        insights = ReportSection(
+            title="Statistical Insights",
+            content=f"## Key Metrics\n" + "\n".join([
+                f"- **{key}**: {value}"
+                for key, value in (insight_analysis.key_statistics.items() if insight_analysis else {})
+            ]) + "\n\n## Patterns Identified\n" + "\n".join([
+                f"- {pattern}"
+                for pattern in (insight_analysis.patterns_identified[:3] if insight_analysis else [])
+            ]),
+            visualizations=insight_analysis.visualizations if insight_analysis else None
+        )
+
+        conclusions = ReportSection(
+            title="Conclusions and Recommendations",
+            content="## Recommendations\n" + "\n".join([
+                f"{i+1}. {rec}"
+                for i, rec in enumerate(critical_analysis.recommendations[:5])
+            ]) + "\n\n## Future Implications\n" + "\n".join([
+                f"- {imp}"
+                for imp in (insight_analysis.future_implications[:3] if insight_analysis else [])
+            ])
+        )
+
+        return ResearchReport(
+            title=f"Research Report: {query}",
+            executive_summary=critical_analysis.executive_summary,
+            introduction=introduction,
+            methodology=methodology,
+            findings=findings,
+            analysis=analysis,
+            insights=insights,
+            conclusions=conclusions,
+            references=search_results.sources if search_results.sources else [],
+            word_count=word_count,
+            key_takeaways=key_takeaways[:5]
+        )
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute report building for the workflow"""
+        try:
+            query = state["research_query"]
+            search_results = state.get("search_results")
+            critical_analysis = state.get("critical_analysis")
+            insight_analysis = state.get("insight_analysis")
+
+            if not search_results or not critical_analysis:
+                return {
+                    **state,
+                    "current_step": "error",
+                    "error": "Cannot generate report without search results and critical analysis"
+                }
+
+            report = self.generate_report(query, search_results, critical_analysis, insight_analysis)
+
+            return {
+                **state,
+                "research_report": report,
+                "current_step": "report_complete"
+            }
+        except Exception as e:
+            return {
+                **state,
+                "current_step": "error",
+                "error": f"Report generation failed: {str(e)}"
+            }
+
+
 class ResearchGraph:
     def __init__(self, api_key: str, tavily_api_key: str):
         self.api_key = api_key
@@ -847,25 +1048,28 @@ class ResearchGraph:
         self.retriever_agent = ContextualRetrieverAgent(api_key, tavily_api_key)
         self.analysis_agent = CriticalAnalysisAgent(api_key)
         self.insight_agent = InsightGenerationAgent(api_key)
+        self.report_agent = ReportBuilderAgent(api_key)
         self.workflow = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(dict)
 
-        # Add nodes for all three agents
+        # Add nodes for all four agents
         workflow.add_node("contextual_retriever", self.retriever_agent.execute)
         workflow.add_node("critical_analysis", self.analysis_agent.execute)
         workflow.add_node("insight_generation", self.insight_agent.execute)
+        workflow.add_node("report_builder", self.report_agent.execute)
 
         # Set the entry point
         workflow.set_entry_point("contextual_retriever")
 
-        # Add edges: retriever -> analysis -> insights
+        # Add edges: retriever -> analysis -> insights -> report
         workflow.add_edge("contextual_retriever", "critical_analysis")
         workflow.add_edge("critical_analysis", "insight_generation")
+        workflow.add_edge("insight_generation", "report_builder")
 
-        # End after insights
-        workflow.add_edge("insight_generation", END)
+        # End after report
+        workflow.add_edge("report_builder", END)
 
         return workflow.compile()
 
@@ -875,6 +1079,7 @@ class ResearchGraph:
             "search_results": None,
             "critical_analysis": None,
             "insight_analysis": None,
+            "research_report": None,
             "current_step": "initial",
             "error": None
         }

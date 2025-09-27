@@ -175,6 +175,53 @@ class InsightAnalysis(BaseModel):
         description="Executive summary of all insights"
     )
 
+class ReportSection(BaseModel):
+    title: str = Field(description="Section title")
+    content: str = Field(description="Section content (markdown supported)")
+    subsections: Optional[List['ReportSection']] = Field(
+        default=None, description="Nested subsections"
+    )
+    visualizations: Optional[List[VisualizationSpec]] = Field(
+        default=None, description="Associated visualizations"
+    )
+    citations: Optional[List[str]] = Field(
+        default=None, description="Citations used in this section"
+    )
+
+class ResearchReport(BaseModel):
+    title: str = Field(description="Report title")
+    executive_summary: str = Field(description="Executive summary of entire research")
+    report_timestamp: datetime = Field(default_factory=datetime.now)
+
+    # Main report sections
+    introduction: ReportSection = Field(description="Introduction section")
+    methodology: ReportSection = Field(description="Research methodology section")
+    findings: ReportSection = Field(description="Main findings section")
+    analysis: ReportSection = Field(description="Critical analysis section")
+    insights: ReportSection = Field(description="Statistical insights section")
+    conclusions: ReportSection = Field(description="Conclusions and recommendations")
+
+    # Supporting information
+    appendices: Optional[List[ReportSection]] = Field(
+        default=None, description="Additional appendices"
+    )
+    references: List[ResearchSource] = Field(
+        description="All sources referenced in the report"
+    )
+
+    # Metadata
+    word_count: int = Field(description="Total word count of report")
+    key_takeaways: List[str] = Field(description="Bullet-point key takeaways")
+
+    # Export formats
+    export_formats_available: List[str] = Field(
+        default=["pdf", "docx", "xml"],
+        description="Available export formats"
+    )
+
+# Update forward reference
+ReportSection.model_rebuild()
+
 class ResearchState(BaseModel):
     research_query: str = Field(description="User's research question")
     search_results: Optional[WebSearchResult] = Field(
@@ -185,6 +232,9 @@ class ResearchState(BaseModel):
     )
     insight_analysis: Optional[InsightAnalysis] = Field(
         default=None, description="Statistical insights from insight generation agent"
+    )
+    research_report: Optional[ResearchReport] = Field(
+        default=None, description="Comprehensive research report from report builder agent"
     )
     current_step: str = Field(
         default="initial", description="Current step in the research process"
