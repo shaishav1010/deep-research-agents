@@ -17,7 +17,7 @@ from models import (
 
 
 class ContextualRetrieverAgent:
-    def __init__(self, api_key: str, tavily_api_key: str):
+    def __init__(self, api_key: str, tavily_api_key: str, status_callback=None):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0.3,
@@ -33,6 +33,7 @@ class ContextualRetrieverAgent:
         self.tavily_api_key = tavily_api_key
         self.parser = PydanticOutputParser(pydantic_object=WebSearchResult)
         self.query_parser = PydanticOutputParser(pydantic_object=RefinedQuery)
+        self.status_callback = status_callback
 
     def refine_query(self, query: str) -> RefinedQuery:
         """Interpret and refine broad or ambiguous queries into subtopics"""
@@ -61,7 +62,10 @@ Please analyze this query and:
             response = self.llm.invoke(formatted_prompt)
             return self.query_parser.parse(response.content)
         except Exception as e:
-            print(f"Query refinement failed: {e}, using original query")
+            msg = f"Query refinement failed: {e}, using original query"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             # Fallback to simple refinement
             return RefinedQuery(
                 original_query=query,
@@ -87,9 +91,9 @@ Please analyze this query and:
             search_query = f"{query} site:arxiv.org OR site:scholar.google.com OR site:pubmed.gov OR research paper"
         elif source_type == "news":
             search_query = f"{query} news latest site:reuters.com OR site:bloomberg.com OR site:wsj.com"
-        elif source_type == "reports":
+        elif source_type == "report":
             search_query = f"{query} report analysis site:mckinsey.com OR site:deloitte.com OR industry report"
-        elif source_type == "databases":
+        elif source_type == "database":
             search_query = f"{query} data statistics site:statista.com OR site:data.gov OR database"
         else:
             search_query = query
@@ -110,10 +114,13 @@ Please analyze this query and:
                     "url": result.get("url", ""),
                     "snippet": result.get("content", "")[:500],
                     "domain": result.get("url", "").split("/")[2] if "/" in result.get("url", "") else "",
-                    "source_type": source_type or "general"
+                    "source_type": source_type or "website"
                 })
         except Exception as e:
-            print(f"Search for {source_type} sources failed: {e}")
+            msg = f"Search for {source_type} sources failed: {e}"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
 
         return results
 
@@ -122,8 +129,8 @@ Please analyze this query and:
         domain_map = {
             "academic": ["arxiv.org", "scholar.google.com", "pubmed.gov", "ieee.org", "nature.com"],
             "news": ["reuters.com", "bloomberg.com", "wsj.com", "ft.com", "economist.com"],
-            "reports": ["mckinsey.com", "deloitte.com", "pwc.com", "gartner.com", "forrester.com"],
-            "databases": ["statista.com", "data.gov", "worldbank.org", "oecd.org"]
+            "report": ["mckinsey.com", "deloitte.com", "pwc.com", "gartner.com", "forrester.com"],
+            "database": ["statista.com", "data.gov", "worldbank.org", "oecd.org"]
         }
         return domain_map.get(source_type, [])
 
@@ -173,13 +180,21 @@ Focus on:
 - Depth of information
 - Unique perspectives or data
 
+IMPORTANT: You MUST include ALL required fields in your response, including:
+- query (string)
+- search_timestamp (datetime)
+- sources (list of sources)
+- total_results_found (integer)
+- search_strategy (string)
+- key_insights (list of strings - at least 3 insights)
+
 {format_instructions}"""),
             ("human", """Research Query: {query}
 
 Search Results:
 {search_results}
 
-Analyze these results and return structured output with the top 10 most relevant sources.""")
+Analyze these results and return structured output with the top 10 most relevant sources. Make sure to include key_insights field with at least 3 insights.""")
         ])
 
         try:
@@ -193,7 +208,10 @@ Analyze these results and return structured output with the top 10 most relevant
             parsed_result = self.parser.parse(response.content)
             return parsed_result
         except Exception as e:
-            print(f"LLM ranking failed: {e}, using fallback ranking")
+            msg = f"LLM ranking failed: {e}, using fallback ranking"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             sources = []
 
             # Safely process search results with proper error handling
@@ -210,7 +228,10 @@ Analyze these results and return structured output with the top 10 most relevant
                             reasoning="Relevant to the research query based on keyword matching"
                         ))
                     except Exception as source_error:
-                        print(f"Error processing source {i}: {source_error}")
+                        msg = f"Error processing source {i}: {source_error}"
+                        print(msg)
+                        if self.status_callback:
+                            self.status_callback(msg)
                         continue
 
             # Always return a valid result, even with empty sources
@@ -225,24 +246,36 @@ Analyze these results and return structured output with the top 10 most relevant
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         query = state.get("research_query", "")
-        print(f"Contextual Retriever Agent: Processing query: {query}")
+        msg = f"Contextual Retriever Agent: Processing query: {query}"
+        print(msg)
+        if self.status_callback:
+            self.status_callback(msg)
 
         try:
             # Step 1: Refine and interpret the query
-            print("Step 1: Refining query and generating subtopics...")
+            msg = "Step 1: Refining query and generating subtopics..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             refined_query = self.refine_query(query)
 
             # Step 2: Search diverse sources for each subtopic
-            print(f"Step 2: Searching across {len(refined_query.subtopics)} subtopics...")
+            msg = f"Step 2: Searching across {len(refined_query.subtopics)} subtopics..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             all_results = []
             sources_by_subtopic = {}
 
             for subtopic in refined_query.subtopics:
-                print(f"  Searching subtopic: {subtopic.topic}")
+                msg = f"  • Researching: {subtopic.topic}"
+                print(msg)
+                if self.status_callback:
+                    self.status_callback(msg)
                 subtopic_results = []
 
                 # Search different source types for each subtopic
-                for source_type in ["academic", "news", "reports", "general"]:
+                for source_type in ["academic", "news", "report", "website"]:
                     for search_query in subtopic.search_queries[:2]:  # Limit queries per subtopic
                         type_results = self.search_diverse_sources(search_query, source_type)
                         subtopic_results.extend(type_results)
@@ -251,10 +284,16 @@ Analyze these results and return structured output with the top 10 most relevant
                 all_results.extend(subtopic_results)
 
             # Step 3: Analyze and rank all results
-            print(f"Step 3: Analyzing and ranking {len(all_results)} total results...")
+            msg = f"Step 3: Analyzing and ranking {len(all_results)} total results..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             # Continue even with no results - let downstream agents handle it
             if not all_results:
-                print("Warning: No search results found, creating empty result set")
+                msg = "No search results found for this query"
+                print(msg)
+                if self.status_callback:
+                    self.status_callback(msg)
                 # Create an empty but valid result
                 empty_result = WebSearchResult(
                     query=query,
@@ -322,7 +361,7 @@ Analyze these results and return structured output with the top 10 most relevant
 
 
 class CriticalAnalysisAgent:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, status_callback=None):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0.2,
@@ -334,6 +373,7 @@ class CriticalAnalysisAgent:
             }
         )
         self.parser = PydanticOutputParser(pydantic_object=CriticalAnalysis)
+        self.status_callback = status_callback
 
     def analyze(self, query: str, search_results: WebSearchResult) -> CriticalAnalysis:
         prompt = ChatPromptTemplate.from_messages([
@@ -412,7 +452,10 @@ Source {i}: {source.title}
             parsed_result = self.parser.parse(response.content)
             return parsed_result
         except Exception as e:
-            print(f"Critical analysis failed: {e}, using fallback analysis")
+            msg = f"Critical analysis failed: {e}, using fallback analysis"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             return self.fallback_analysis(query, search_results)
 
     def fallback_analysis(self, query: str, search_results: WebSearchResult) -> CriticalAnalysis:
@@ -446,7 +489,10 @@ Source {i}: {source.title}
         )
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        print("Critical Analysis Agent executing...")
+        msg = "Critical Analysis Agent executing..."
+        print(msg)
+        if self.status_callback:
+            self.status_callback(msg)
 
         # Get search results from previous step
         search_results = state.get("search_results")
@@ -479,7 +525,7 @@ Source {i}: {source.title}
 
 
 class InsightGenerationAgent:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, status_callback=None):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0.3,
@@ -491,6 +537,109 @@ class InsightGenerationAgent:
             }
         )
         self.parser = PydanticOutputParser(pydantic_object=InsightAnalysis)
+        self.status_callback = status_callback
+
+    def create_visualizations_from_analysis(self, critical_analysis: CriticalAnalysis,
+                                           search_results: WebSearchResult = None) -> List[VisualizationSpec]:
+        """Create visualizations based on critical analysis findings"""
+        visualizations = []
+
+        # 1. Key Findings Confidence Distribution
+        if critical_analysis.key_findings:
+            findings_labels = []
+            confidence_scores = []
+            for i, finding in enumerate(critical_analysis.key_findings[:6]):
+                findings_labels.append(f"Finding {i+1}")
+                confidence_scores.append(finding.confidence * 100)
+
+            visualizations.append(VisualizationSpec(
+                chart_type="bar",
+                title="Confidence Levels of Key Findings",
+                x_label="Findings",
+                y_label="Confidence (%)",
+                data={
+                    "x": findings_labels,
+                    "y": confidence_scores
+                }
+            ))
+
+        # 2. Source Credibility Scores
+        if critical_analysis.source_validations:
+            source_names = []
+            credibility_scores = []
+            for validation in critical_analysis.source_validations[:6]:  # Limit to 6 sources
+                source_names.append(validation.source_title[:30] + "..." if len(validation.source_title) > 30 else validation.source_title)
+                credibility_scores.append(validation.credibility_score)
+
+            if source_names:
+                visualizations.append(VisualizationSpec(
+                    chart_type="bar",
+                    title="Source Credibility Analysis",
+                    x_label="Sources",
+                    y_label="Credibility Score (%)",
+                    data={
+                        "x": source_names,
+                        "y": credibility_scores
+                    }
+                ))
+
+        # 3. Contradictions vs Consensus
+        num_contradictions = len(critical_analysis.contradictions) if critical_analysis.contradictions else 0
+        num_consensus = len(critical_analysis.consensus_points) if critical_analysis.consensus_points else 0
+
+        if num_contradictions + num_consensus > 0:
+            visualizations.append(VisualizationSpec(
+                chart_type="pie",
+                title="Analysis: Consensus vs Contradictions",
+                x_label="Type",
+                y_label="Count",
+                data={
+                    "labels": ["Consensus Points", "Contradictions"],
+                    "values": [num_consensus, num_contradictions]
+                }
+            ))
+
+        return visualizations
+
+    def create_fallback_insights_from_analysis(self, query: str, critical_analysis: CriticalAnalysis,
+                                              search_results: WebSearchResult, visualizations: List[VisualizationSpec]) -> InsightAnalysis:
+        """Create insights directly from critical analysis when LLM fails"""
+
+        # Calculate basic statistics from critical analysis
+        key_statistics = {
+            "total_findings": len(critical_analysis.key_findings) if critical_analysis.key_findings else 0,
+            "consensus_points": len(critical_analysis.consensus_points) if critical_analysis.consensus_points else 0,
+            "contradictions": len(critical_analysis.contradictions) if critical_analysis.contradictions else 0,
+            "sources_validated": len(critical_analysis.source_validations) if critical_analysis.source_validations else 0,
+            "avg_confidence": sum(f.confidence for f in (critical_analysis.key_findings or [])) / len(critical_analysis.key_findings) * 100 if critical_analysis.key_findings else 0
+        }
+
+        return InsightAnalysis(
+            research_query=query,
+            source_categorization=[],
+            topic_categorization=[],
+            temporal_trends=[],
+            relevance_trends=[],
+            key_statistics=key_statistics,
+            statistical_insights=[
+                StatisticalInsight(
+                    insight_type="summary",
+                    title="Analysis Summary",
+                    description=f"Found {key_statistics['total_findings']} key findings with {key_statistics['consensus_points']} consensus points and {key_statistics['contradictions']} contradictions",
+                    data_points=[],
+                    significance=0.8,
+                    implications=["Analysis shows comprehensive coverage of the research topic"]
+                )
+            ],
+            visualizations=visualizations,
+            patterns_identified=[
+                f"Identified {key_statistics['total_findings']} key research findings",
+                f"Found {key_statistics['consensus_points']} areas of agreement across sources",
+                f"Detected {key_statistics['contradictions']} contradictory viewpoints"
+            ],
+            future_implications=critical_analysis.recommendations[:3] if critical_analysis.recommendations else [],
+            executive_insight_summary=critical_analysis.executive_summary or "Analysis completed successfully"
+        )
 
     def generate_insights(self, query: str, search_results: WebSearchResult,
                          critical_analysis: CriticalAnalysis = None) -> InsightAnalysis:
@@ -676,7 +825,10 @@ Type: {source.source_type.value}
 
             return age_data
 
-        print(f"Creating visualizations for query with {len(search_results.sources)} sources")
+        msg = f"Analyzing data from {len(search_results.sources)} sources for insights..."
+        print(msg)
+        if self.status_callback:
+            self.status_callback(msg)
 
         # Extract all numeric data from sources
         numeric_data = extract_numbers_from_sources(search_results.sources)
@@ -834,7 +986,10 @@ Type: {source.source_type.value}
 
         # If no visualizations created yet, but we have numeric data, use it
         if len(visualizations) == 0 and numeric_data:
-            print("Creating visualization from extracted numeric data")
+            msg = "Generating data visualizations from findings..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             top_numbers = sorted(numeric_data, key=lambda x: x['value'], reverse=True)[:5]
             if top_numbers:
                 visualizations.append(VisualizationSpec(
@@ -850,7 +1005,10 @@ Type: {source.source_type.value}
 
         # Final fallback if still no visualizations
         if len(visualizations) == 0:
-            print("No extractable numeric data found in sources - showing source quality metrics")
+            msg = "Creating source analysis visualizations..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             # Show source quality distribution
             quality_ranges = {"High (80-100)": 0, "Medium (60-79)": 0, "Low (40-59)": 0, "Very Low (<40)": 0}
             for score in relevance_scores:
@@ -917,11 +1075,20 @@ Type: {source.source_type.value}
         # Debug: Verify visualization data
         for i, viz in enumerate(visualizations, 1):
             if viz.chart_type == "pie":
-                print(f"Visualization {i}: {viz.title} (pie) - labels: {len(viz.data.get('labels', []))}, values: {len(viz.data.get('values', []))}")
+                msg = f"Visualization {i}: {viz.title} (pie) - labels: {len(viz.data.get('labels', []))}, values: {len(viz.data.get('values', []))}"
+                print(msg)
+                if self.status_callback:
+                    self.status_callback(msg)
             else:
-                print(f"Visualization {i}: {viz.title} ({viz.chart_type}) - x: {len(viz.data.get('x', []))}, y: {len(viz.data.get('y', []))}")
+                msg = f"Visualization {i}: {viz.title} ({viz.chart_type}) - x: {len(viz.data.get('x', []))}, y: {len(viz.data.get('y', []))}"
+                print(msg)
+                if self.status_callback:
+                    self.status_callback(msg)
                 if len(viz.data.get('y', [])) > 0:
-                    print(f"  Sample data: {viz.data.get('y', [])[:3]}...")
+                    msg = f"  Sample data: {viz.data.get('y', [])[:3]}..."
+                    print(msg)
+                    if self.status_callback:
+                        self.status_callback(msg)
 
         # Statistical insights
         statistical_insights = [
@@ -979,34 +1146,53 @@ Type: {source.source_type.value}
         )
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        print("Insight Generation Agent executing...")
+        msg = "Insight Generation Agent executing..."
+        print(msg)
+        if self.status_callback:
+            self.status_callback(msg)
 
         search_results = state.get("search_results")
-        critical_analysis = state.get("critical_analysis")  # Optional, not required
+        critical_analysis = state.get("critical_analysis")
         query = state.get("research_query", "")
 
-        if not search_results:
+        if not critical_analysis:
             return {
                 **state,
                 "insight_analysis": None,
                 "current_step": "error",
-                "error": "Missing search results for insight generation"
+                "error": "Missing critical analysis for insight generation"
             }
 
         try:
-            # Pass critical_analysis as optional parameter (can be None)
-            insights = self.generate_insights(query, search_results, critical_analysis)
+            msg = "Generating insights from critical analysis findings..."
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
+
+            # Create visualizations based on critical analysis
+            visualizations = self.create_visualizations_from_analysis(critical_analysis, search_results)
+
+            # Try to generate full insights via LLM
+            try:
+                insights = self.generate_insights(query, search_results, critical_analysis)
+                # Replace visualizations with analysis-based ones
+                insights.visualizations = visualizations
+            except:
+                # Fallback: create insights manually from analysis
+                insights = self.create_fallback_insights_from_analysis(
+                    query, critical_analysis, search_results, visualizations
+                )
 
             # Debug logging
-            print(f"Generated {len(insights.visualizations)} visualizations")
+            msg = f"Generated {len(insights.visualizations)} data visualizations from analysis"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             for viz in insights.visualizations:
-                print(f"  - {viz.chart_type}: {viz.title}")
-                if viz.chart_type == "pie":
-                    print(f"    Labels: {viz.data.get('labels', [])}")
-                    print(f"    Values: {viz.data.get('values', [])}")
-                else:
-                    print(f"    X data: {viz.data.get('x', [])}")
-                    print(f"    Y data: {viz.data.get('y', [])}")
+                msg = f"  • {viz.title}"
+                print(msg)
+                if self.status_callback:
+                    self.status_callback(msg)
 
             return {
                 **state,
@@ -1015,7 +1201,10 @@ Type: {source.source_type.value}
                 "error": None
             }
         except Exception as e:
-            print(f"Insight generation error: {str(e)}")
+            msg = f"Insight generation error: {str(e)}"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             return {
                 **state,
                 "insight_analysis": None,
@@ -1025,7 +1214,7 @@ Type: {source.source_type.value}
 
 
 class ReportBuilderAgent:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, status_callback=None):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0.2,
@@ -1037,6 +1226,7 @@ class ReportBuilderAgent:
             }
         )
         self.parser = PydanticOutputParser(pydantic_object=ResearchReport)
+        self.status_callback = status_callback
 
     def generate_report(self, query: str, search_results: WebSearchResult,
                         critical_analysis: CriticalAnalysis,
@@ -1100,7 +1290,10 @@ Create a professional report with proper sections, clear takeaways, and word cou
 
             return report
         except Exception as e:
-            print(f"LLM parsing failed: {e}")
+            msg = f"LLM parsing failed: {e}"
+            print(msg)
+            if self.status_callback:
+                self.status_callback(msg)
             return self._generate_fallback_report(query, search_results, critical_analysis, insight_analysis)
 
     def _generate_fallback_report(self, query: str, search_results: WebSearchResult,
@@ -1225,14 +1418,21 @@ Create a professional report with proper sections, clear takeaways, and word cou
 
 
 class ResearchGraph:
-    def __init__(self, api_key: str, tavily_api_key: str):
+    def __init__(self, api_key: str, tavily_api_key: str, status_callback=None):
         self.api_key = api_key
-        # Initialize agents
-        self.retriever_agent = ContextualRetrieverAgent(api_key, tavily_api_key)
-        self.analysis_agent = CriticalAnalysisAgent(api_key)
-        self.insight_agent = InsightGenerationAgent(api_key)
-        self.report_agent = ReportBuilderAgent(api_key)
+        self.status_callback = status_callback  # Callback for status updates
+        # Initialize agents with status callback
+        self.retriever_agent = ContextualRetrieverAgent(api_key, tavily_api_key, status_callback)
+        self.analysis_agent = CriticalAnalysisAgent(api_key, status_callback)
+        self.insight_agent = InsightGenerationAgent(api_key, status_callback)
+        self.report_agent = ReportBuilderAgent(api_key, status_callback)
         self.workflow = self._build_graph()
+
+    def update_status(self, message: str):
+        """Send status update to callback if provided"""
+        if self.status_callback:
+            self.status_callback(message)
+        print(message)  # Also print to console
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(dict)

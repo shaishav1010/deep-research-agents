@@ -642,15 +642,25 @@ def main():
                         unsafe_allow_html=True
                     )
 
-            # Current agent description
-            current_agent_info = st.empty()
-            current_agent_info.info(f"💡 Initializing research workflow...")
+            # Console output display for real-time feedback
+            st.markdown("#### 📋 Live Progress")
+            console_output = st.empty()
+            current_agent_info = console_output  # Keep compatibility
 
             # Run the actual research
             try:
+                # Status callback to update UI
+                status_messages = []
+
+                def update_status(message):
+                    status_messages.append(message)
+                    # Display only the current/latest message
+                    console_output.info(f"💡 {message}")
+
                 research_graph = ResearchGraph(
                     st.session_state.openrouter_api_key,
-                    st.session_state.tavily_api_key
+                    st.session_state.tavily_api_key,
+                    status_callback=update_status
                 )
 
                 import time
