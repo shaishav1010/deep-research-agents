@@ -186,10 +186,6 @@ def display_research_results(results: ResearchState):
     if results.critical_analysis:
         analysis = results.critical_analysis
 
-        # Executive Summary
-        st.markdown("### 📋 Executive Summary")
-        st.info(analysis.executive_summary)
-
         # Key Findings
         st.markdown("### 🎯 Key Findings")
         for finding in analysis.key_findings:
@@ -429,7 +425,7 @@ def display_research_results(results: ResearchState):
 
 def main():
     st.set_page_config(
-        page_title="AI Deep Research Agent",
+        page_title="SynthiVerseAI",
         page_icon="🔬",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -504,39 +500,41 @@ def main():
         - Collaborate with AI agents
         """)
 
-    st.markdown("# 🔬 AI Deep Research Agent")
-    st.markdown("### Welcome to your intelligent research assistant")
+    st.markdown("# 🔬 SynthiVerseAI")
+    st.markdown("### Welcome to advanced synthesis and deep exploration")
 
-    col1, col2, col3 = st.columns(3)
+    # Collapsible info section - collapsed by default
+    with st.expander("ℹ️ About This Tool", expanded=False):
+        col1, col2, col3 = st.columns(3)
 
-    with col1:
-        st.markdown("""
-        #### 🎯 Features
-        - Multi-agent collaboration
-        - Deep web research
-        - Source verification
-        - Report generation
-        - Real-time analysis
-        """)
+        with col1:
+            st.markdown("""
+            #### 🎯 Features
+            - Multi-agent collaboration
+            - Deep web research
+            - Source verification
+            - Report generation
+            - Real-time analysis
+            """)
 
-    with col2:
-        st.markdown("""
-        #### 🚀 Getting Started
-        1. Enter your OpenRouter API key
-        2. Verify the connection
-        3. Start your research
-        4. Review generated reports
-        """)
+        with col2:
+            st.markdown("""
+            #### 🚀 Getting Started
+            1. Enter your OpenRouter API key
+            2. Verify the connection
+            3. Start your research
+            4. Review generated reports
+            """)
 
-    with col3:
-        st.markdown("""
-        #### 💡 Use Cases
-        - Academic research
-        - Market analysis
-        - Technical documentation
-        - Competitive intelligence
-        - Trend analysis
-        """)
+        with col3:
+            st.markdown("""
+            #### 💡 Use Cases
+            - Academic research
+            - Market analysis
+            - Technical documentation
+            - Competitive intelligence
+            - Trend analysis
+            """)
 
     st.markdown("---")
 
@@ -585,19 +583,179 @@ def main():
                     st.warning("Please enter a research topic")
 
         if st.session_state.research_in_progress:
-            with st.spinner("🔎 Contextual Retriever Agent searching sources... → Critical Analysis Agent analyzing findings... → Insight Generation Agent creating visualizations..."):
-                try:
-                    research_graph = ResearchGraph(
-                        st.session_state.openrouter_api_key,
-                        st.session_state.tavily_api_key
+            # Define agent stages
+            agents = [
+                {
+                    "name": "Contextual Retriever",
+                    "icon": "🔎",
+                    "description": "Refining query, identifying subtopics, searching sources",
+                    "progress": 0.25,
+                    "stage": 1
+                },
+                {
+                    "name": "Critical Analysis",
+                    "icon": "🧠",
+                    "description": "Synthesizing findings, validating sources, finding consensus",
+                    "progress": 0.50,
+                    "stage": 2
+                },
+                {
+                    "name": "Insight Generation",
+                    "icon": "📊",
+                    "description": "Statistical analysis, pattern identification, visualizations",
+                    "progress": 0.75,
+                    "stage": 3
+                },
+                {
+                    "name": "Report Builder",
+                    "icon": "📝",
+                    "description": "Compiling comprehensive report with recommendations",
+                    "progress": 1.0,
+                    "stage": 4
+                }
+            ]
+
+            # Create a nice progress display
+            st.markdown("### 🚀 Research Pipeline")
+
+            # Progress bar
+            progress_bar = st.progress(0.0, text="Initializing research workflow...")
+
+            # Create columns for all 4 agents
+            agent_cols = st.columns(4)
+
+            # Create placeholders for each agent status
+            agent_placeholders = []
+            for i, (col, agent) in enumerate(zip(agent_cols, agents)):
+                with col:
+                    placeholder = st.empty()
+                    agent_placeholders.append(placeholder)
+                    # Initial state - all agents shown as pending (gray)
+                    placeholder.markdown(
+                        f"""
+                        <div style='text-align: center; padding: 10px; background-color: #f0f0f0; border-radius: 10px; margin: 5px;'>
+                            <h3 style='color: #666;'>{agent['icon']}</h3>
+                            <b style='color: #666;'>{agent['name']}</b><br>
+                            <small style='color: #999;'>⏳ Pending</small>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
-                    result = research_graph.run(research_topic)
-                    st.session_state.research_results = result
-                    st.session_state.research_in_progress = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Research failed: {str(e)}")
-                    st.session_state.research_in_progress = False
+
+            # Current agent description
+            current_agent_info = st.empty()
+            current_agent_info.info(f"💡 Initializing research workflow...")
+
+            # Run the actual research
+            try:
+                research_graph = ResearchGraph(
+                    st.session_state.openrouter_api_key,
+                    st.session_state.tavily_api_key
+                )
+
+                import time
+
+                # Update agent status display function
+                def update_agent_display(agent_index, status="running"):
+                    for i, (placeholder, agent) in enumerate(zip(agent_placeholders, agents)):
+                        if i < agent_index:
+                            # Completed agents - green
+                            placeholder.markdown(
+                                f"""
+                                <div style='text-align: center; padding: 10px; background-color: #d4edda; border: 2px solid #28a745; border-radius: 10px; margin: 5px;'>
+                                    <h3 style='color: #28a745;'>{agent['icon']}</h3>
+                                    <b style='color: #155724;'>{agent['name']}</b><br>
+                                    <small style='color: #28a745;'>✓ Complete</small>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        elif i == agent_index:
+                            # Current agent - yellow/processing
+                            placeholder.markdown(
+                                f"""
+                                <div style='text-align: center; padding: 10px; background-color: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; margin: 5px; animation: pulse 2s infinite;'>
+                                    <h3 style='color: #856404;'>{agent['icon']}</h3>
+                                    <b style='color: #856404;'>{agent['name']}</b><br>
+                                    <small style='color: #856404;'>⚙️ Running</small>
+                                </div>
+                                <style>
+                                    @keyframes pulse {{
+                                        0% {{ opacity: 1; }}
+                                        50% {{ opacity: 0.7; }}
+                                        100% {{ opacity: 1; }}
+                                    }}
+                                </style>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            # Pending agents - gray
+                            placeholder.markdown(
+                                f"""
+                                <div style='text-align: center; padding: 10px; background-color: #f0f0f0; border-radius: 10px; margin: 5px;'>
+                                    <h3 style='color: #666;'>{agent['icon']}</h3>
+                                    <b style='color: #666;'>{agent['name']}</b><br>
+                                    <small style='color: #999;'>⏳ Pending</small>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                # Stage 1: Contextual Retriever
+                update_agent_display(0, "running")
+                current_agent_info.info(f"💡 {agents[0]['description']}")
+                progress_bar.progress(0.05, text=f"Stage 1/4: {agents[0]['name']} Agent...")
+
+                # Run the research (this runs all agents)
+                result = research_graph.run(research_topic)
+
+                # Simulate progression through agents
+                time.sleep(1.0)
+                update_agent_display(1, "running")
+                current_agent_info.info(f"💡 {agents[1]['description']}")
+                progress_bar.progress(0.30, text=f"Stage 2/4: {agents[1]['name']} Agent...")
+
+                time.sleep(1.0)
+                update_agent_display(2, "running")
+                current_agent_info.info(f"💡 {agents[2]['description']}")
+                progress_bar.progress(0.60, text=f"Stage 3/4: {agents[2]['name']} Agent...")
+
+                time.sleep(1.0)
+                update_agent_display(3, "running")
+                current_agent_info.info(f"💡 {agents[3]['description']}")
+                progress_bar.progress(0.90, text=f"Stage 4/4: {agents[3]['name']} Agent...")
+
+                time.sleep(0.5)
+
+                # Mark all as complete
+                for i in range(4):
+                    placeholder = agent_placeholders[i]
+                    agent = agents[i]
+                    placeholder.markdown(
+                        f"""
+                        <div style='text-align: center; padding: 10px; background-color: #d4edda; border: 2px solid #28a745; border-radius: 10px; margin: 5px;'>
+                            <h3 style='color: #28a745;'>{agent['icon']}</h3>
+                            <b style='color: #155724;'>{agent['name']}</b><br>
+                            <small style='color: #28a745;'>✓ Complete</small>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                # Complete
+                st.session_state.research_results = result
+                st.session_state.research_in_progress = False
+
+                progress_bar.progress(1.0, text="✅ Research completed successfully!")
+                current_agent_info.success("🎉 All agents have completed their analysis. Report is ready!")
+                time.sleep(1.5)
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ Research failed: {str(e)}")
+                st.session_state.research_in_progress = False
+                progress_bar.progress(0.0, text="Research failed")
 
         if st.session_state.research_results:
             display_research_results(st.session_state.research_results)

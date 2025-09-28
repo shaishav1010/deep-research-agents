@@ -74,10 +74,29 @@ def generate_pdf(report: ResearchReport) -> bytes:
     # Add main sections
     def add_section(section: ReportSection):
         elements.append(Paragraph(section.title, heading_style))
-        # Convert markdown-like formatting to HTML for reportlab
+        # Convert markdown-like formatting to safe HTML for reportlab
         content = section.content.replace('\n', '<br/>')
-        content = content.replace('**', '<b>').replace('*', '<i>')
-        elements.append(Paragraph(content, body_style))
+
+        # Handle bold markdown (**text**)
+        import re
+        content = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', content)
+
+        # Handle italic markdown (*text*) - but not if it's part of bold
+        content = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'<i>\1</i>', content)
+
+        # Handle headers (##, ###, etc.)
+        content = re.sub(r'^#{1,6}\s+(.+)$', r'<b>\1</b>', content, flags=re.MULTILINE)
+
+        # Escape any remaining problematic characters
+        content = content.replace('&', '&amp;')
+        content = content.replace('<br/><br/>', '<br/>')
+
+        try:
+            elements.append(Paragraph(content, body_style))
+        except Exception as e:
+            # If parsing fails, add plain text
+            plain_content = section.content.replace('**', '').replace('*', '').replace('#', '')
+            elements.append(Paragraph(plain_content.replace('\n', '<br/>'), body_style))
 
         if section.subsections:
             for subsection in section.subsections:
