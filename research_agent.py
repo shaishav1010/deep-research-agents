@@ -493,7 +493,7 @@ class InsightGenerationAgent:
         self.parser = PydanticOutputParser(pydantic_object=InsightAnalysis)
 
     def generate_insights(self, query: str, search_results: WebSearchResult,
-                         critical_analysis: CriticalAnalysis) -> InsightAnalysis:
+                         critical_analysis: CriticalAnalysis = None) -> InsightAnalysis:
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a data insights and visualization expert specializing in extracting quantitative insights from research data.
 
@@ -548,17 +548,18 @@ Content: {source.snippet}
 Type: {source.source_type.value}
 """)
 
-        # Prepare key findings detail
-        key_findings_detail = "\n".join([
-            f"- {finding.finding} (Confidence: {finding.confidence:.0%})"
-            for finding in critical_analysis.key_findings
-        ])
-
-        # Prepare consensus detail
-        consensus_detail = "\n".join([
-            f"- {point}"
-            for point in critical_analysis.consensus_points
-        ])
+        # Prepare key findings detail (if critical analysis available)
+        key_findings_detail = ""
+        consensus_detail = ""
+        if critical_analysis:
+            key_findings_detail = "\n".join([
+                f"- {finding.finding} (Confidence: {finding.confidence:.0%})"
+                for finding in critical_analysis.key_findings
+            ])
+            consensus_detail = "\n".join([
+                f"- {point}"
+                for point in critical_analysis.consensus_points
+            ])
 
         try:
             formatted_prompt = prompt.format_messages(
@@ -577,8 +578,9 @@ Type: {source.source_type.value}
             return self._generate_fallback_insights(query, search_results, critical_analysis)
 
     def _generate_fallback_insights(self, query: str, search_results: WebSearchResult,
-                                   critical_analysis: CriticalAnalysis) -> InsightAnalysis:
+                                   critical_analysis: CriticalAnalysis = None) -> InsightAnalysis:
         """Generate contextual insights based on query without LLM"""
+        import re
 
         # Analyze query to determine what kind of data to extract
         query_lower = query.lower()
@@ -629,66 +631,178 @@ Type: {source.source_type.value}
             "min_relevance": min(relevance_scores) if relevance_scores else 0,
             "total_sources": total_sources,
             "num_subtopics": len(search_results.refined_query.subtopics) if search_results.refined_query else 1,
-            "confidence_level": 0.7 if critical_analysis.key_findings else 0.5
+            "confidence_level": 0.65 if search_results.sources else 0.5  # Based on search results only
         }
 
-        # Create contextual visualizations based on query type
+        # Create contextual visualizations based on query type and extracted data
         visualizations = []
 
-        # Always create visualizations with data
+        # Extract numeric data from source snippets
+        def extract_numbers_from_sources(sources, pattern=r'\b(\d+(?:\.\d+)?)\s*(%|percent|percentage|years?|months?|days?|hours?)?'):
+            """Extract numbers with optional units from source snippets"""
+            extracted_data = []
+            for source in sources:
+                matches = re.findall(pattern, source.snippet, re.IGNORECASE)
+                for match in matches:
+                    number = float(match[0])
+                    unit = match[1] if match[1] else ''
+                    extracted_data.append({
+                        'value': number,
+                        'unit': unit.lower(),
+                        'source': source.title,
+                        'snippet': source.snippet[:100]
+                    })
+            return extracted_data
+
+        # Extract age-related data
+        def extract_age_data(sources):
+            """Extract age-related statistics from sources"""
+            age_patterns = [
+                (r'(\d+)\s*(?:to|-)\s*(\d+)\s*(?:year|yr)', 'age_range'),
+                (r'age(?:d|s)?\s*(\d+)', 'specific_age'),
+                (r'(toddler|infant|child|teen|adolescent|adult)', 'age_group'),
+                (r'(\d+)\s*(?:%|percent)\s*(?:of\s+)?(?:children|teens|adults)', 'percentage')
+            ]
+
+            age_data = {}
+            for source in sources:
+                text = source.snippet.lower()
+                for pattern, data_type in age_patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    if matches:
+                        if data_type not in age_data:
+                            age_data[data_type] = []
+                        age_data[data_type].extend(matches)
+
+            return age_data
+
         print(f"Creating visualizations for query with {len(search_results.sources)} sources")
 
-        # Determine visualization type based on query keywords
-        if any(keyword in query_lower for keyword in ['age', 'group', 'demographic', 'kids', 'children', 'teens', 'brain']):
-            # Create age group visualization with example data
-            visualizations.append(VisualizationSpec(
-                chart_type="bar",
-                title="Mobile Phone Impact by Age Group",
-                x_label="Age Groups",
-                y_label="Screen Time Impact Score (%)",
-                data={
-                    "x": ["0-3 years", "4-7 years", "8-12 years", "13-17 years", "18+ years"],
-                    "y": [15, 35, 65, 85, 70]  # Example data showing increasing impact with age
-                }
-            ))
+        # Extract all numeric data from sources
+        numeric_data = extract_numbers_from_sources(search_results.sources)
 
-            # Add a second chart for cognitive effects
-            visualizations.append(VisualizationSpec(
-                chart_type="bar",
-                title="Cognitive Development Impact by Age",
-                x_label="Age Groups",
-                y_label="Cognitive Impact (%)",
-                data={
-                    "x": ["Toddlers (0-3)", "Preschool (4-6)", "Elementary (7-11)", "Teens (12-17)"],
-                    "y": [80, 60, 40, 30]  # Higher impact on younger children
-                }
-            ))
+        # Determine visualization type based on query keywords and extracted data
+        if any(keyword in query_lower for keyword in ['age', 'group', 'demographic', 'kids', 'children', 'teens', 'brain']):
+            age_data = extract_age_data(search_results.sources)
+
+            # Try to extract percentage data by age groups
+            percentages_by_age = []
+            age_groups = []
+
+            for source in search_results.sources:
+                # Look for patterns like "X% of children/teens"
+                matches = re.findall(r'(\d+(?:\.\d+)?)\s*%\s*of\s*(children|teens|adults|toddlers|infants)',
+                                   source.snippet, re.IGNORECASE)
+                for match in matches:
+                    percentages_by_age.append(float(match[0]))
+                    age_groups.append(match[1].capitalize())
+
+            # If we found age-related data, use it
+            if percentages_by_age and age_groups:
+                visualizations.append(VisualizationSpec(
+                    chart_type="bar",
+                    title="Statistics by Age Group (From Sources)",
+                    x_label="Age Groups",
+                    y_label="Percentage (%)",
+                    data={
+                        "x": age_groups[:5],  # Limit to 5 groups
+                        "y": percentages_by_age[:5]
+                    }
+                ))
+            else:
+                # Use any percentages found in the context of the query
+                percentage_values = [d['value'] for d in numeric_data if d['unit'] in ['%', 'percent', 'percentage']]
+                if percentage_values:
+                    visualizations.append(VisualizationSpec(
+                        chart_type="bar",
+                        title="Key Statistics from Research",
+                        x_label="Data Points",
+                        y_label="Value (%)",
+                        data={
+                            "x": [f"Statistic {i+1}" for i in range(min(5, len(percentage_values)))],
+                            "y": percentage_values[:5]
+                        }
+                    ))
 
         elif any(keyword in query_lower for keyword in ['trend', 'over time', 'year', 'timeline', 'history']):
-            # Create time series visualization
-            visualizations.append(VisualizationSpec(
-                chart_type="line",
-                title="Trends Over Time",
-                x_label="Time Period",
-                y_label="Metric Value",
-                data={
-                    "x": ["2019", "2020", "2021", "2022", "2023", "2024"],
-                    "y": [20, 25, 35, 45, 60, 75]  # Example trend data
-                }
-            ))
+            # Extract year data
+            year_pattern = r'\b(19\d{2}|20\d{2})\b'
+            years_data = {}
+
+            for source in search_results.sources:
+                years = re.findall(year_pattern, source.snippet)
+                for year in years:
+                    # Look for associated values near the year
+                    value_pattern = rf'{year}\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(%|percent)?'
+                    values = re.findall(value_pattern, source.snippet, re.IGNORECASE)
+                    if values:
+                        years_data[year] = float(values[0][0])
+
+            if years_data:
+                sorted_years = sorted(years_data.items())
+                visualizations.append(VisualizationSpec(
+                    chart_type="line",
+                    title="Trends Over Time (Extracted from Sources)",
+                    x_label="Year",
+                    y_label="Value",
+                    data={
+                        "x": [year for year, _ in sorted_years],
+                        "y": [value for _, value in sorted_years]
+                    }
+                ))
+            elif numeric_data:
+                # Use any numeric progression found
+                values = [d['value'] for d in numeric_data[:6]]
+                if values:
+                    visualizations.append(VisualizationSpec(
+                        chart_type="line",
+                        title="Data Progression",
+                        x_label="Data Points",
+                        y_label="Value",
+                        data={
+                            "x": [f"Point {i+1}" for i in range(len(values))],
+                            "y": values
+                        }
+                    ))
 
         elif any(keyword in query_lower for keyword in ['compare', 'versus', 'vs', 'difference', 'comparison']):
-            # Create comparison chart
-            visualizations.append(VisualizationSpec(
-                chart_type="bar",
-                title="Comparative Analysis",
-                x_label="Categories",
-                y_label="Values",
-                data={
-                    "x": ["Category A", "Category B", "Category C", "Category D"],
-                    "y": [45, 60, 30, 75]
-                }
-            ))
+            # Extract comparison data
+            comparison_values = []
+            comparison_labels = []
+
+            for source in search_results.sources:
+                # Look for patterns like "A is X% while B is Y%"
+                comp_pattern = r'(\w+)\s+(?:is|has|shows)\s+(\d+(?:\.\d+)?)\s*%'
+                matches = re.findall(comp_pattern, source.snippet, re.IGNORECASE)
+                for match in matches:
+                    comparison_labels.append(match[0][:20])  # Limit label length
+                    comparison_values.append(float(match[1]))
+
+            if comparison_values and comparison_labels:
+                visualizations.append(VisualizationSpec(
+                    chart_type="bar",
+                    title="Comparative Analysis (From Sources)",
+                    x_label="Categories",
+                    y_label="Values (%)",
+                    data={
+                        "x": comparison_labels[:4],
+                        "y": comparison_values[:4]
+                    }
+                ))
+            elif numeric_data:
+                # Use top numeric values for comparison
+                top_values = sorted(numeric_data, key=lambda x: x['value'], reverse=True)[:4]
+                if top_values:
+                    visualizations.append(VisualizationSpec(
+                        chart_type="bar",
+                        title="Key Metrics Comparison",
+                        x_label="Metrics",
+                        y_label="Values",
+                        data={
+                            "x": [f"Metric {i+1}" for i in range(len(top_values))],
+                            "y": [d['value'] for d in top_values]
+                        }
+                    ))
 
         # Add subtopic distribution if we have multiple subtopics
         if topic_categories and len(topic_categories) > 1:
@@ -701,45 +815,113 @@ Type: {source.source_type.value}
                 }
             ))
 
-        # Add key metrics visualization if we have findings
-        if critical_analysis.key_findings:
-            confidence_levels = [f.confidence for f in critical_analysis.key_findings[:5]]
-            finding_labels = [f"Finding {i+1}" for i in range(len(confidence_levels))]
+        # Add relevance score visualization for top sources
+        if search_results.sources:
+            top_sources = search_results.sources[:5]
+            source_relevances = [s.relevance_score for s in top_sources]
+            source_labels = [f"Source {i+1}" for i in range(len(top_sources))]
 
             visualizations.append(VisualizationSpec(
                 chart_type="bar",
-                title="Key Findings Confidence Levels",
-                x_label="Research Findings",
-                y_label="Confidence Score",
+                title="Top Source Relevance Scores",
+                x_label="Research Sources",
+                y_label="Relevance Score (%)",
                 data={
-                    "x": finding_labels,
-                    "y": [c * 100 for c in confidence_levels]  # Convert to percentage
+                    "x": source_labels,
+                    "y": source_relevances  # Already in percentage format
                 }
             ))
 
-        # If no visualizations created yet, add a default one
+        # If no visualizations created yet, but we have numeric data, use it
+        if len(visualizations) == 0 and numeric_data:
+            print("Creating visualization from extracted numeric data")
+            top_numbers = sorted(numeric_data, key=lambda x: x['value'], reverse=True)[:5]
+            if top_numbers:
+                visualizations.append(VisualizationSpec(
+                    chart_type="bar",
+                    title="Key Quantitative Findings",
+                    x_label="Data Points",
+                    y_label="Values",
+                    data={
+                        "x": [f"Finding {i+1}" for i in range(len(top_numbers))],
+                        "y": [d['value'] for d in top_numbers]
+                    }
+                ))
+
+        # Final fallback if still no visualizations
         if len(visualizations) == 0:
-            print("Creating default visualization as no specific type matched")
+            print("No extractable numeric data found in sources - showing source quality metrics")
+            # Show source quality distribution
+            quality_ranges = {"High (80-100)": 0, "Medium (60-79)": 0, "Low (40-59)": 0, "Very Low (<40)": 0}
+            for score in relevance_scores:
+                if score >= 80:
+                    quality_ranges["High (80-100)"] += 1
+                elif score >= 60:
+                    quality_ranges["Medium (60-79)"] += 1
+                elif score >= 40:
+                    quality_ranges["Low (40-59)"] += 1
+                else:
+                    quality_ranges["Very Low (<40)"] += 1
+
             visualizations.append(VisualizationSpec(
                 chart_type="bar",
-                title="Research Data Overview",
-                x_label="Categories",
-                y_label="Values",
+                title="Source Quality Distribution",
+                x_label="Quality Range",
+                y_label="Number of Sources",
                 data={
-                    "x": ["Category A", "Category B", "Category C", "Category D"],
-                    "y": [25, 40, 30, 35]
+                    "x": list(quality_ranges.keys()),
+                    "y": list(quality_ranges.values())
                 }
             ))
 
-        # Limit to 3 visualizations maximum
+        # Ensure we always have exactly 3 visualizations
+        if len(visualizations) < 3:
+            # Add source type distribution
+            if len(visualizations) < 3 and source_categories:
+                visualizations.append(VisualizationSpec(
+                    chart_type="pie",
+                    title="Source Type Distribution",
+                    data={
+                        "labels": [cat.category for cat in source_categories],
+                        "values": [cat.count for cat in source_categories]
+                    }
+                ))
+
+            # Add relevance score distribution
+            if len(visualizations) < 3:
+                relevance_bins = {"0-25": 0, "25-50": 0, "50-75": 0, "75-100": 0}
+                for score in relevance_scores:
+                    if score < 25:
+                        relevance_bins["0-25"] += 1
+                    elif score < 50:
+                        relevance_bins["25-50"] += 1
+                    elif score < 75:
+                        relevance_bins["50-75"] += 1
+                    else:
+                        relevance_bins["75-100"] += 1
+
+                visualizations.append(VisualizationSpec(
+                    chart_type="bar",
+                    title="Relevance Score Distribution",
+                    x_label="Score Range",
+                    y_label="Number of Sources",
+                    data={
+                        "x": list(relevance_bins.keys()),
+                        "y": list(relevance_bins.values())
+                    }
+                ))
+
+        # Ensure exactly 3 visualizations
         visualizations = visualizations[:3]
 
         # Debug: Verify visualization data
-        for viz in visualizations:
+        for i, viz in enumerate(visualizations, 1):
             if viz.chart_type == "pie":
-                print(f"Pie chart data - labels: {len(viz.data.get('labels', []))}, values: {len(viz.data.get('values', []))}")
+                print(f"Visualization {i}: {viz.title} (pie) - labels: {len(viz.data.get('labels', []))}, values: {len(viz.data.get('values', []))}")
             else:
-                print(f"{viz.chart_type} chart data - x: {len(viz.data.get('x', []))}, y: {len(viz.data.get('y', []))}")
+                print(f"Visualization {i}: {viz.title} ({viz.chart_type}) - x: {len(viz.data.get('x', []))}, y: {len(viz.data.get('y', []))}")
+                if len(viz.data.get('y', [])) > 0:
+                    print(f"  Sample data: {viz.data.get('y', [])[:3]}...")
 
         # Statistical insights
         statistical_insights = [
@@ -800,18 +982,19 @@ Type: {source.source_type.value}
         print("Insight Generation Agent executing...")
 
         search_results = state.get("search_results")
-        critical_analysis = state.get("critical_analysis")
+        critical_analysis = state.get("critical_analysis")  # Optional, not required
         query = state.get("research_query", "")
 
-        if not search_results or not critical_analysis:
+        if not search_results:
             return {
                 **state,
                 "insight_analysis": None,
                 "current_step": "error",
-                "error": "Missing required data for insight generation"
+                "error": "Missing search results for insight generation"
             }
 
         try:
+            # Pass critical_analysis as optional parameter (can be None)
             insights = self.generate_insights(query, search_results, critical_analysis)
 
             # Debug logging
@@ -1063,7 +1246,7 @@ class ResearchGraph:
         # Set the entry point
         workflow.set_entry_point("contextual_retriever")
 
-        # Add edges: retriever -> analysis -> insights -> report
+        # Add edges: sequential execution
         workflow.add_edge("contextual_retriever", "critical_analysis")
         workflow.add_edge("critical_analysis", "insight_generation")
         workflow.add_edge("insight_generation", "report_builder")
