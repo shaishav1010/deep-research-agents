@@ -109,12 +109,21 @@ Please analyze this query and:
             )
 
             for result in search_response.get("results", []):
+                # Map source_type to valid enum values
+                type_mapping = {
+                    "academic": "academic_paper",
+                    "news": "news_article",
+                    "report": "report",
+                    "database": "database"
+                }
+                mapped_type = type_mapping.get(source_type, "website")
+
                 results.append({
                     "title": result.get("title", ""),
                     "url": result.get("url", ""),
                     "snippet": result.get("content", "")[:500],
                     "domain": result.get("url", "").split("/")[2] if "/" in result.get("url", "") else "",
-                    "source_type": source_type or "website"
+                    "source_type": mapped_type
                 })
         except Exception as e:
             msg = f"Search for {source_type} sources failed: {e}"
@@ -167,7 +176,8 @@ Please analyze this query and:
             )
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are an expert research analyst. Analyze the search results and:
-1. Classify each source by type (academic_paper, news_article, blog_post, documentation, etc.)
+1. Classify each source by type - MUST be one of these exact values:
+   academic_paper, news_article, blog_post, documentation, forum, video, report, book, website, database, other
 2. Assign a relevance score (0-100) based on how well it answers the research query
 3. Provide reasoning for the relevance score
 4. Extract key insights from the collection of sources
@@ -180,13 +190,15 @@ Focus on:
 - Depth of information
 - Unique perspectives or data
 
-IMPORTANT: You MUST include ALL required fields in your response, including:
-- query (string)
-- search_timestamp (datetime)
-- sources (list of sources)
-- total_results_found (integer)
-- search_strategy (string)
-- key_insights (list of strings - at least 3 insights)
+CRITICAL: You MUST include ALL these required fields in your response:
+- query: the research query string
+- search_timestamp: current timestamp
+- sources: list of sources (each with title, url, snippet, source_type, relevance_score, domain, reasoning)
+- total_results_found: total number of results (integer)
+- search_strategy: description of search strategy used
+- key_insights: list of at least 3 key insights extracted from the sources
+
+For source_type, use ONLY these exact values: academic_paper, news_article, blog_post, documentation, forum, video, report, book, website, database, other
 
 {format_instructions}"""),
             ("human", """Research Query: {query}
@@ -194,14 +206,19 @@ IMPORTANT: You MUST include ALL required fields in your response, including:
 Search Results:
 {search_results}
 
-Analyze these results and return structured output with the top 10 most relevant sources. Make sure to include key_insights field with at least 3 insights.""")
+Analyze these results and return structured output with the top 10 most relevant sources.
+Remember to include:
+- total_results_found: {total_results}
+- search_strategy: describe your search approach
+- key_insights: at least 3 insights from the sources""")
         ])
 
         try:
             formatted_prompt = prompt.format_messages(
                 format_instructions=self.parser.get_format_instructions(),
                 query=query,
-                search_results=json.dumps(search_results, indent=2)
+                search_results=json.dumps(search_results, indent=2),
+                total_results=len(search_results) if search_results else 0
             )
 
             response = self.llm.invoke(formatted_prompt)
@@ -234,14 +251,31 @@ Analyze these results and return structured output with the top 10 most relevant
                             self.status_callback(msg)
                         continue
 
+            # Generate meaningful insights even in fallback mode
+            insights = []
+            if sources:
+                insights.append(f"Found {len(sources)} relevant sources for the query")
+                # Extract domains
+                unique_domains = set(s.domain for s in sources if s.domain)
+                if unique_domains:
+                    insights.append(f"Sources span across {len(unique_domains)} different domains")
+                # Add a general insight about the topic
+                insights.append(f"Sources provide multiple perspectives on {query}")
+            else:
+                insights.extend([
+                    "No sources found for the query",
+                    "Consider refining search terms",
+                    "Try alternative keywords or broader search"
+                ])
+
             # Always return a valid result, even with empty sources
             return WebSearchResult(
                 query=query,
                 search_timestamp=datetime.now(),
                 sources=sources,
                 total_results_found=len(search_results) if search_results else 0,
-                search_strategy="Web search with fallback ranking",
-                key_insights=[f"Found {len(sources)} sources" if sources else "No sources found"]
+                search_strategy="Web search with fallback ranking due to parsing error",
+                key_insights=insights[:3] if len(insights) >= 3 else insights + ["Additional research recommended"] * (3 - len(insights))
             )
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
