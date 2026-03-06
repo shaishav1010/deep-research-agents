@@ -1,3 +1,12 @@
+---
+title: Shah's Deep Research Multi-Agent
+emoji: 🤖
+colorFrom: purple
+colorTo: pink
+sdk: docker
+pinned: false
+---
+
 # SynthiVerseAI - Deep Research Multi-Agent System
 
 **Welcome to advanced synthesis and deep exploration**
